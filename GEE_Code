@@ -1,0 +1,124 @@
+// ------------------------------------------
+// Define boundary for Nepal region
+// ------------------------------------------
+var bnd_np = ee.FeatureCollection("projects/servir-hkh/RLCMS/NEP/bnd/bnd_buff_n").geometry();
+
+// ------------------------------------------
+// Define year and export path
+// ------------------------------------------
+var year = 2023;
+var exportPath = "projects/servir-hkh/FRTC_WB/composites";
+
+// ------------------------------------------
+// Load Sentinel-2 image collections
+// ------------------------------------------
+var s2Sr = ee.ImageCollection('COPERNICUS/S2_SR');
+var s2Clouds = ee.ImageCollection('COPERNICUS/S2_CLOUD_PROBABILITY');
+
+// Visualization parameters (NIR, Red, Green)
+var rgbVis = {min: 500, max: 4500, bands: ['B8', 'B4', 'B3']};
+
+// Date range
+var START_DATE = ee.Date(year + '-01-01');
+var END_DATE = ee.Date(year + '-12-31');
+
+// Cloud probability thresholds
+var MAX_CLOUD_5 = 15;
+var MAX_CLOUD_80 = 80;
+
+// ------------------------------------------
+// Step 0: Import external composite metric script
+// ------------------------------------------
+var compositeMetric = require('users/kabiruddinbd/frtc_wb_scripts:SupportScripts/2_compositeMetric');
+
+// ------------------------------------------
+// Define functions
+// ------------------------------------------
+
+// Mask clouds using the cloud probability band
+function maskClouds(img, threshold) {
+  var clouds = ee.Image(img.get('cloud_mask')).select('probability');
+  var isNotCloud = clouds.lt(threshold);
+  return img.updateMask(isNotCloud);
+}
+
+// Mask image edges using valid data in B8A and B9
+function maskEdges(s2_img) {
+  return s2_img.updateMask(
+    s2_img.select('B8A').mask().updateMask(s2_img.select('B9').mask())
+  );
+}
+
+// Select only consistently available bands
+var COMMON_BANDS = ['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7',
+                    'B8', 'B8A', 'B9', 'B11', 'B12',
+                    'AOT', 'WVP', 'SCL',
+                    'TCI_R', 'TCI_G', 'TCI_B',
+                    'MSK_CLDPRB', 'MSK_SNWPRB'];
+
+function selectCommonBands(img) {
+  return img.select(COMMON_BANDS);
+}
+
+// ------------------------------------------
+// Data processing
+// ------------------------------------------
+var criteria = ee.Filter.and(
+  ee.Filter.bounds(bnd_np),
+  ee.Filter.date(START_DATE, END_DATE)
+);
+
+var filteredS2 = s2Sr.filter(criteria).map(maskEdges);
+var filteredClouds = s2Clouds.filter(criteria);
+
+// Join Sentinel-2 SR and cloud probability datasets
+var s2SrWithCloudMask = ee.Join.saveFirst('cloud_mask').apply({
+  primary: filteredS2,
+  secondary: filteredClouds,
+  condition: ee.Filter.equals({
+    leftField: 'system:index',
+    rightField: 'system:index'
+  })
+});
+
+// Cloud masking and band filtering
+var s2CloudMasked5 = ee.ImageCollection(s2SrWithCloudMask)
+  .map(function(img) {
+    return maskClouds(img, MAX_CLOUD_5);
+  })
+  .map(selectCommonBands)
+  .median();
+
+var s2CloudMasked80 = ee.ImageCollection(s2SrWithCloudMask)
+  .map(function(img) {
+    return maskClouds(img, MAX_CLOUD_80);
+  })
+  .map(selectCommonBands)
+  .median();
+
+// Final composite from two thresholds
+var SentinelComposite = ee.ImageCollection.fromImages([
+  s2CloudMasked80,
+  s2CloudMasked5
+]).mosaic();
+
+// ------------------------------------------
+// Display and export
+// ------------------------------------------
+Map.centerObject(bnd_np, 7);
+Map.addLayer(SentinelComposite.clip(bnd_np), rgbVis, 'Sentinel Composite');
+
+// Export the final composite to asset
+Export.image.toAsset({
+  image: SentinelComposite,
+  description: "SentinelComposite-" + year,
+  assetId: exportPath + "/" + year,
+  region: bnd_np,
+  scale: 10,
+  maxPixels: 1e13
+});
+
+/*
+Kabir Uddin, ICIMOD, Nepal
+Email: kabir.uddin@icimod.org | kabir.uddin.bd@gmail.com
+*/
