@@ -1,5 +1,5 @@
 // ------------------------------------------
-// Define boundary for Nepal region
+// Uploded boundary shapefile for Nepal
 // ------------------------------------------
 var bnd_np = ee.FeatureCollection("projects/servir-hkh/RLCMS/NEP/bnd/bnd_buff_n").geometry();
 
@@ -119,6 +119,6 @@ Export.image.toAsset({
 });
 
 /*
-Kabir Uddin, ICIMOD, Nepal
+Author: Kabir Uddin, ICIMOD, Nepal
 Email: kabir.uddin@icimod.org | kabir.uddin.bd@gmail.com
 */
